@@ -2,28 +2,41 @@
 'use strict';
 
 const API = {
+  _h() {
+    const t = localStorage.getItem('pt_token');
+    const h = { 'Content-Type': 'application/json' };
+    if (t) h['Authorization'] = `Bearer ${t}`;
+    return h;
+  },
   async get(path) {
-    const r = await fetch(path);
+    const r = await fetch(path, { headers: this._h() });
+    if (r.status === 401) { App.logout(); return null; }
     if (!r.ok) throw new Error((await r.json()).error || r.statusText);
     return r.json();
   },
   async post(path, body) {
-    const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const r = await fetch(path, { method: 'POST', headers: this._h(), body: JSON.stringify(body) });
+    if (r.status === 401) { App.logout(); return null; }
     if (!r.ok) throw new Error((await r.json()).error || r.statusText);
     return r.json();
   },
   async put(path, body) {
-    const r = await fetch(path, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const r = await fetch(path, { method: 'PUT', headers: this._h(), body: JSON.stringify(body) });
+    if (r.status === 401) { App.logout(); return null; }
     if (!r.ok) throw new Error((await r.json()).error || r.statusText);
     return r.json();
   },
   async delete(path) {
-    const r = await fetch(path, { method: 'DELETE' });
+    const r = await fetch(path, { method: 'DELETE', headers: this._h() });
+    if (r.status === 401) { App.logout(); return null; }
     if (!r.ok) throw new Error((await r.json()).error || r.statusText);
     return r.json();
   },
   async upload(path, formData) {
-    const r = await fetch(path, { method: 'POST', body: formData });
+    const t = localStorage.getItem('pt_token');
+    const h = t ? { 'Authorization': `Bearer ${t}` } : {};
+    const r = await fetch(path, { method: 'POST', headers: h, body: formData });
+    if (r.status === 401) { App.logout(); return null; }
     if (!r.ok) throw new Error((await r.json()).error || r.statusText);
     return r.json();
   }
@@ -130,7 +143,22 @@ function nav(params) {
 
 // ── Router ────────────────────────────────────────────────────────────────────
 const App = {
+  currentUser: null,
+
+  showAuth(type = 'login') {
+    document.body.classList.add('auth-mode');
+    document.getElementById('appMain').innerHTML = type === 'register' ? Views.register() : Views.login();
+  },
+
+  logout() {
+    localStorage.removeItem('pt_token');
+    App.currentUser = null;
+    toast('Logged out successfully');
+    App.showAuth('login');
+  },
+
   async navigate(view, params = {}) {
+    document.body.classList.remove('auth-mode');
     State.history.push({ view: State.view, params: State.params });
     State.view = view;
     State.params = params;
@@ -188,6 +216,48 @@ const App = {
 
 // ── Views ─────────────────────────────────────────────────────────────────────
 const Views = {
+
+  // Login
+  login: () => `
+    <div class="auth-card">
+      <div class="auth-logo">🏠</div>
+      <h1 class="auth-title">PropertyTrack</h1>
+      <p class="auth-subtitle">Sign in to your account</p>
+      <div class="form-group">
+        <label class="form-label">Email</label>
+        <input class="form-control" id="authEmail" type="email" placeholder="your@email.com" autocomplete="email" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Password</label>
+        <input class="form-control" id="authPassword" type="password" placeholder="••••••••" autocomplete="current-password"
+          onkeydown="if(event.key==='Enter')Actions.login()" />
+      </div>
+      <button class="btn btn-primary btn-full" id="authBtn" onclick="Actions.login()">Sign In</button>
+      <p class="auth-switch">Don't have an account? <a href="#" onclick="event.preventDefault();App.showAuth('register')">Create one</a></p>
+    </div>`,
+
+  // Register
+  register: () => `
+    <div class="auth-card">
+      <div class="auth-logo">🏠</div>
+      <h1 class="auth-title">PropertyTrack</h1>
+      <p class="auth-subtitle">Create your account</p>
+      <div class="form-group">
+        <label class="form-label">Your Name</label>
+        <input class="form-control" id="authName" type="text" placeholder="e.g. John Smith" autocomplete="name" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Email</label>
+        <input class="form-control" id="authEmail" type="email" placeholder="your@email.com" autocomplete="email" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Password</label>
+        <input class="form-control" id="authPassword" type="password" placeholder="Min 6 characters" autocomplete="new-password"
+          onkeydown="if(event.key==='Enter')Actions.register()" />
+      </div>
+      <button class="btn btn-primary btn-full" id="authBtn" onclick="Actions.register()">Create Account</button>
+      <p class="auth-switch">Already have an account? <a href="#" onclick="event.preventDefault();App.showAuth('login')">Sign in</a></p>
+    </div>`,
 
   // Dashboard
   async dashboard(el) {
@@ -788,6 +858,19 @@ const Views = {
         </div>
 
         <button class="btn btn-primary btn-full" onclick="Actions.saveSettings()">Save Settings</button>
+
+        ${App.currentUser ? `
+        <div class="settings-section" style="margin-top:16px">
+          <div class="settings-section-title">Account</div>
+          <div class="settings-item" style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+            <div>
+              <div style="font-weight:600;font-size:15px">${App.currentUser.name}</div>
+              <div style="font-size:13px;color:var(--text-muted)">${App.currentUser.email}</div>
+            </div>
+            <button class="btn btn-sm btn-ghost" style="color:var(--danger);border-color:var(--danger);flex-shrink:0" onclick="App.logout()">Log Out</button>
+          </div>
+        </div>` : ''}
+
         <div style="height:16px"></div>
       </div>`;
     } catch (e) {
@@ -798,6 +881,55 @@ const Views = {
 
 // ── Actions ───────────────────────────────────────────────────────────────────
 const Actions = {
+
+  // Auth
+  async login() {
+    const email = document.getElementById('authEmail')?.value.trim();
+    const password = document.getElementById('authPassword')?.value;
+    if (!email || !password) return toast('Enter your email and password', 'warning');
+    const btn = document.getElementById('authBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Signing in…'; }
+    try {
+      const r = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
+      const data = await r.json();
+      if (!r.ok) { toast(data.error || 'Login failed', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'Sign In'; } return; }
+      localStorage.setItem('pt_token', data.token);
+      App.currentUser = data.user;
+      document.body.classList.remove('auth-mode');
+      State.settings = await API.get('/api/settings') || {};
+      window._currency = State.settings.currency || 'AED';
+      App.navigate('dashboard');
+      toast(`Welcome back, ${data.user.name}! 👋`, 'success');
+    } catch (e) {
+      toast('Connection error — try again', 'error');
+      if (btn) { btn.disabled = false; btn.textContent = 'Sign In'; }
+    }
+  },
+
+  async register() {
+    const name = document.getElementById('authName')?.value.trim();
+    const email = document.getElementById('authEmail')?.value.trim();
+    const password = document.getElementById('authPassword')?.value;
+    if (!email || !password) return toast('Enter your email and password', 'warning');
+    if (password.length < 6) return toast('Password must be at least 6 characters', 'warning');
+    const btn = document.getElementById('authBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Creating account…'; }
+    try {
+      const r = await fetch('/api/auth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password, name }) });
+      const data = await r.json();
+      if (!r.ok) { toast(data.error || 'Registration failed', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'Create Account'; } return; }
+      localStorage.setItem('pt_token', data.token);
+      App.currentUser = data.user;
+      document.body.classList.remove('auth-mode');
+      State.settings = await API.get('/api/settings') || {};
+      window._currency = State.settings.currency || 'AED';
+      App.navigate('dashboard');
+      toast(`Welcome to PropertyTrack, ${data.user.name}! 🎉`, 'success');
+    } catch (e) {
+      toast('Connection error — try again', 'error');
+      if (btn) { btn.disabled = false; btn.textContent = 'Create Account'; }
+    }
+  },
 
   // Dashboard "Upload Contract" quick-action
   async quickUploadContract() {
@@ -1368,8 +1500,21 @@ const GoogleDrive = {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 async function init() {
+  const token = localStorage.getItem('pt_token');
+  if (!token) { App.showAuth('login'); return; }
+
+  // Validate token with server
   try {
-    State.settings = await API.get('/api/settings');
+    const r = await fetch('/api/auth/me', { headers: { 'Authorization': `Bearer ${token}` } });
+    if (!r.ok) { localStorage.removeItem('pt_token'); App.showAuth('login'); return; }
+    App.currentUser = await r.json();
+  } catch {
+    App.showAuth('login');
+    return;
+  }
+
+  try {
+    State.settings = await API.get('/api/settings') || {};
     window._currency = State.settings.currency || 'AED';
   } catch (e) {
     // Settings not critical for first load

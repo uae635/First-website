@@ -12,27 +12,59 @@ mkdirSync(DATA_DIR, { recursive: true });
 const DB_PATH = join(DATA_DIR, 'db.json');
 
 function load() {
-  if (!existsSync(DB_PATH)) return { properties: [], units: [], payments: [], settings: {} };
-  try { return JSON.parse(readFileSync(DB_PATH, 'utf8')); }
-  catch { return { properties: [], units: [], payments: [], settings: {} }; }
+  if (!existsSync(DB_PATH)) return { users: [], properties: [], units: [], payments: [], settings: {} };
+  try {
+    const db = JSON.parse(readFileSync(DB_PATH, 'utf8'));
+    if (!db.users) db.users = [];
+    return db;
+  }
+  catch { return { users: [], properties: [], units: [], payments: [], settings: {} }; }
 }
 
 function save(db) {
   writeFileSync(DB_PATH, JSON.stringify(db, null, 2));
 }
 
+// ── Users ─────────────────────────────────────────────────────────────────────
+export function getUserByEmail(email) {
+  return load().users.find(u => u.email.toLowerCase() === email.toLowerCase()) || null;
+}
+
+export function getUserById(id) {
+  return load().users.find(u => u.id === id) || null;
+}
+
+export function createUser(email, passwordHash, name) {
+  const db = load();
+  const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
+  const user = { id, email, password_hash: passwordHash, name, created_at: new Date().toISOString() };
+  db.users.push(user);
+  save(db);
+  return user;
+}
+
+// Assign all properties without a user_id to the given user (migration for first user)
+export function claimOrphanedProperties(userId) {
+  const db = load();
+  let changed = false;
+  db.properties.forEach(p => { if (!p.user_id) { p.user_id = userId; changed = true; } });
+  if (changed) save(db);
+}
+
 // ── Properties ────────────────────────────────────────────────────────────────
-export function getProperties() {
-  return load().properties.sort((a, b) => b.created_at.localeCompare(a.created_at));
+export function getProperties(userId) {
+  return load().properties
+    .filter(p => p.user_id === userId)
+    .sort((a, b) => b.created_at.localeCompare(a.created_at));
 }
 
 export function getProperty(id) {
   return load().properties.find(p => p.id === id) || null;
 }
 
-export function insertProperty(id, name, address) {
+export function insertProperty(id, name, address, userId) {
   const db = load();
-  db.properties.push({ id, name, address, created_at: new Date().toISOString() });
+  db.properties.push({ id, name, address, user_id: userId, created_at: new Date().toISOString() });
   save(db);
 }
 
@@ -85,31 +117,41 @@ export function getPayments(unitId) {
     .sort((a, b) => a.due_date.localeCompare(b.due_date));
 }
 
-export function getUpcomingPayments() {
+export function getUpcomingPayments(userId) {
   const db = load();
   const today = new Date().toISOString().slice(0, 10);
   const in30 = new Date(Date.now() + 30 * 864e5).toISOString().slice(0, 10);
+  const unitIds = _userUnitIds(db, userId);
 
   return db.payments
-    .filter(p => p.status === 'pending' && p.due_date >= today && p.due_date <= in30)
+    .filter(p => unitIds.has(p.unit_id) && p.status === 'pending' && p.due_date >= today && p.due_date <= in30)
     .map(p => _enrichPayment(p, db))
     .sort((a, b) => a.due_date.localeCompare(b.due_date));
 }
 
-export function getOverduePayments() {
+export function getOverduePayments(userId) {
   const db = load();
   const today = new Date().toISOString().slice(0, 10);
+  const unitIds = _userUnitIds(db, userId);
 
   return db.payments
-    .filter(p => p.status === 'pending' && p.due_date < today)
+    .filter(p => unitIds.has(p.unit_id) && p.status === 'pending' && p.due_date < today)
     .map(p => _enrichPayment(p, db))
     .sort((a, b) => a.due_date.localeCompare(b.due_date));
 }
 
-export function getAllPendingPayments() {
+function _userUnitIds(db, userId) {
+  // If no userId provided, return all unit IDs (for scheduler/global use)
+  if (!userId) return new Set(db.units.map(u => u.id));
+  const propIds = new Set(db.properties.filter(p => p.user_id === userId).map(p => p.id));
+  return new Set(db.units.filter(u => propIds.has(u.property_id)).map(u => u.id));
+}
+
+export function getAllPendingPayments(userId) {
   const db = load();
+  const unitIds = _userUnitIds(db, userId);
   return db.payments
-    .filter(p => p.status === 'pending')
+    .filter(p => unitIds.has(p.unit_id) && p.status === 'pending')
     .map(p => _enrichPayment(p, db))
     .sort((a, b) => a.due_date.localeCompare(b.due_date));
 }
